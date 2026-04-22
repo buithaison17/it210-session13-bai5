@@ -1,20 +1,31 @@
-HQL (Hibernate Query Language) và Native Query đều được dùng để truy vấn dữ liệu trong Hibernate, nhưng khác nhau ở mức độ trừu tượng và khả năng phụ thuộc vào database.
+Nếu truy cập vào danh sách chi tiết thuốc được cấu hình `FetchType.LAZY` sau khi Session (hoặc EntityManager) đã đóng, hệ thống sẽ phát sinh lỗi `LazyInitializationException`.
 
-HQL:
-- Là ngôn ngữ truy vấn hướng đối tượng.
-- Làm việc với entity class và thuộc tính Java.
-- Hibernate sẽ tự động chuyển HQL sang SQL tương ứng với database đang dùng.
-- Không phụ thuộc trực tiếp vào tên bảng/cột trong DB.
+Kịch bản lỗi xảy ra như sau:
+- Entity cha (ví dụ `Prescription`) được truy vấn trong service layer.
+- Session hoặc transaction kết thúc (đóng persistence context).
+- Sau đó ở tầng controller hoặc view, chương trình cố truy cập vào danh sách `medicines` (được load LAZY).
+- Hibernate cố gắng load dữ liệu nhưng không còn session để thực hiện truy vấn → phát sinh `LazyInitializationException: could not initialize proxy - no Session`.
 
-Native Query:
-- Là SQL thuần.
-- Truy vấn trực tiếp vào bảng và cột trong database.
-- Phụ thuộc hoàn toàn vào cấu trúc và cú pháp của từng hệ quản trị cơ sở dữ liệu.
-- Nếu DB thay đổi (ví dụ MySQL → PostgreSQL) hoặc đổi tên bảng/cột thì phải sửa toàn bộ query.
+Hậu quả:
+- Ứng dụng bị lỗi runtime khi truy cập dữ liệu liên quan.
+- API có thể trả về lỗi 500 hoặc dữ liệu thiếu.
 
-So sánh nhanh:
-- HQL: trừu tượng hơn, độc lập database, dễ bảo trì.
-- Native Query: linh hoạt, tối ưu hiệu năng trong một số trường hợp nhưng phụ thuộc DB.
+Cách khắc phục:
+1. Dùng `JOIN FETCH` trong HQL/JPQL:
+   - Lấy luôn dữ liệu con ngay từ đầu khi query entity cha.
+   - Ví dụ: `SELECT p FROM Prescription p JOIN FETCH p.medicines`
 
-Tại sao HQL an toàn hơn khi thay đổi database:
-HQL không gắn trực tiếp với tên bảng và cú pháp SQL cụ thể mà dựa trên entity mapping. Khi thay đổi database, Hibernate chỉ cần thay đổi dialect để sinh SQL phù hợp, còn code HQL vẫn giữ nguyên. Điều này giúp giảm rủi ro lỗi do khác biệt cú pháp SQL giữa các hệ quản trị, đồng thời không phải sửa lại toàn bộ câu truy vấn trong code, giúp hệ thống dễ bảo trì và mở rộng hơn.
+2. Mở session trong phạm vi cần thiết (Open Session in View):
+   - Giữ session mở đến khi render view (thường dùng trong web MVC).
+   - Tuy nhiên dễ gây vấn đề hiệu năng nếu lạm dụng.
+
+3. Fetch dữ liệu trong service layer (khuyến nghị):
+   - Chuyển entity sang DTO trước khi trả về controller.
+   - Đảm bảo toàn bộ dữ liệu cần thiết được load trong transaction.
+
+4. Chuyển sang `FetchType.EAGER` (ít khuyến khích):
+   - Load luôn dữ liệu con khi truy vấn cha.
+   - Có thể gây thừa dữ liệu và giảm hiệu năng nếu quan hệ lớn.
+
+=> Cách tối ưu nhất thường là dùng `JOIN FETCH` kết hợp DTO để kiểm soát dữ liệu rõ ràng và tránh lỗi LazyInitializationException.
+
